@@ -441,12 +441,9 @@ const getStatusBadgeStyle = (status) => {
         <div class="flex items-start justify-between">
           <span class="text-xs font-medium text-slate-700">Rata-rata Tekanan Air</span>
           <div class="w-9 h-9 rounded-lg border border-slate-700 flex items-center justify-center text-slate-800">
-            <!-- Water pressure gauge / manometer meter icon -->
+            <!-- Pressure gauge icon from project icons library -->
             <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M12 21a9 9 0 100-18 9 9 0 000 18z" />
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M12 12l3.5-3.5" />
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M12 13a1 1 0 100-2 1 1 0 000 2z" />
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M6.5 12h1M16.5 12h1M12 6.5v1" />
+              <use href="/icons.svg#pressure-gauge-icon" />
             </svg>
           </div>
         </div>
