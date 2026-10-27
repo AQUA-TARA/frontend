@@ -18,7 +18,7 @@
 const rawApiUrl = (
   import.meta.env.VITE_API_BASE_URL ||
   import.meta.env.VITE_API_URL ||
-  (import.meta.env.PROD ? 'https://backend-nu-azure-25.vercel.app' : 'http://localhost:8000')
+  (import.meta.env.PROD ? 'https://backend.wasmer.dev' : 'http://localhost:8000')
 ).trim().replace(/\/+$/, '')
 
 export const API_BASE = rawApiUrl.endsWith('/api')
