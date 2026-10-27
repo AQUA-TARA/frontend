@@ -1,0 +1,620 @@
+/**
+ * mockServer.js — AQUA-TARA Mock API Server
+ *
+ * PURPOSE: Simulate the agreed Laravel API contract for frontend development.
+ *          This is NOT a real backend, NOT Supabase, NOT Laravel.
+ *          It is entirely replaceable by the real Laravel API later.
+ *
+ * ENDPOINTS (per docs/API_CONTRACT.md):
+ *   POST /api/reports          — Submit citizen water quality report
+ *   GET  /api/tickets/:id      — Get ticket status & history
+ *   GET  /api/citizen/history  — Get citizen report history (mock: no real auth)
+ *   GET  /api/map/public       — Get public-safe map markers
+ *
+ * STATUSES (per DEC-002):
+ *   SUBMITTED → IN_REVIEW → CONFIRMED → IN_PROGRESS → CLOSED
+ *
+ * RISK SCORE: NOT generated. Placeholder only (per DEC-017).
+ */
+
+import express from 'express'
+import cors from 'cors'
+import multer from 'multer'
+
+const app = express()
+app.use(cors())
+app.use(express.json())
+app.use(express.urlencoded({ extended: true }))
+
+// multer: memory storage (mock — no real file saved to disk)
+// Accepts multipart/form-data as required by API_CONTRACT.md section 7 & 13
+const upload = multer({ storage: multer.memoryStorage() })
+
+// ---------------------------------------------------------------------------
+// Deterministic Mock Data
+// ---------------------------------------------------------------------------
+
+/**
+ * A single canonical mock ticket.
+ * ticket_id matches DEV-TICKET-001 used in devReportState.js for cross-linking.
+ * Statuses are from DEC-002 canonical workflow.
+ */
+const MOCK_TICKETS = {
+  'DEV-TICKET-001': {
+    ticket_id: 'DEV-TICKET-001',
+    status: 'IN_PROGRESS',
+    created_at: '2026-09-25T07:00:00.000Z',
+    latitude: 3.3275,
+    longitude: 117.5892,
+    description: 'Air keruh berwarna coklat dan berbau kaporit menyengat sejak jam 6 pagi.',
+    photo_url: null,
+    // Status history per DEC-002 canonical workflow
+    history: [
+      { status: 'SUBMITTED',   timestamp: '2026-09-25T07:00:00.000Z' },
+      { status: 'IN_REVIEW',   timestamp: '2026-09-25T08:15:00.000Z' },
+      { status: 'CONFIRMED',   timestamp: '2026-09-25T09:30:00.000Z' },
+      { status: 'IN_PROGRESS', timestamp: '2026-09-25T10:45:00.000Z' }
+    ]
+  },
+  'DEV-TICKET-002': {
+    ticket_id: 'DEV-TICKET-002',
+    status: 'CLOSED',
+    created_at: '2026-09-18T09:00:00.000Z',
+    latitude: 3.3082,
+    longitude: 117.6045,
+    description: 'Aliran air tiba-tiba terhenti di kelurahan Pamusian.',
+    photo_url: null,
+    history: [
+      { status: 'SUBMITTED',   timestamp: '2026-09-18T09:00:00.000Z' },
+      { status: 'IN_REVIEW',   timestamp: '2026-09-18T10:00:00.000Z' },
+      { status: 'CONFIRMED',   timestamp: '2026-09-18T11:30:00.000Z' },
+      { status: 'IN_PROGRESS', timestamp: '2026-09-18T13:00:00.000Z' },
+      { status: 'CLOSED',      timestamp: '2026-09-19T08:00:00.000Z' }
+    ]
+  }
+}
+
+// ---------------------------------------------------------------------------
+// POST /api/reports
+// Contract ref: API_CONTRACT.md § 13
+// Request: multipart/form-data — photo (required), latitude, longitude, description (optional)
+// Success: 201 { success, message, data: { ticket_id, status: 'SUBMITTED' } }
+// Error:   422 if photo or coordinates missing
+// ---------------------------------------------------------------------------
+app.post('/api/reports', upload.single('photo'), (req, res) => {
+  const latitude = req.body?.latitude ?? req.body?.lat
+  const longitude = req.body?.longitude ?? req.body?.lng
+  const photo = req.file
+
+  if (
+    !photo ||
+    latitude === undefined ||
+    latitude === null ||
+    longitude === undefined ||
+    longitude === null
+  ) {
+    return res.status(422).json({
+      success: false,
+      error: {
+        code: 'VALIDATION_ERROR',
+        message:
+          'Foto dan koordinat GPS wajib disertakan. Pastikan izin kamera dan lokasi diaktifkan.'
+      }
+    })
+  }
+
+  const lat = Number(latitude)
+  const lng = Number(longitude)
+
+  if (
+    !Number.isFinite(lat) ||
+    !Number.isFinite(lng) ||
+    lat < -90 ||
+    lat > 90 ||
+    lng < -180 ||
+    lng > 180
+  ) {
+    return res.status(422).json({
+      success: false,
+      error: {
+        code: 'VALIDATION_ERROR',
+        message: 'Koordinat GPS tidak valid.'
+      }
+    })
+  }
+
+  const reportType = req.body?.report_type
+  const allowedReportTypes = ['kebocoran', 'air_keruh', 'lainnya']
+  if (!reportType || !allowedReportTypes.includes(reportType)) {
+    return res.status(422).json({
+      success: false,
+      message: 'Validasi gagal.',
+      errors: {
+        report_type: ['Kategori laporan wajib dipilih dan harus salah satu dari: kebocoran, air_keruh, lainnya.']
+      }
+    })
+  }
+
+  // Generate a unique ID without overwriting seeded example tickets.
+  let ticketId
+  do {
+    ticketId = `DEV-TICKET-${Date.now()}`
+  } while (Object.prototype.hasOwnProperty.call(MOCK_TICKETS, ticketId))
+
+  const createdAt = new Date().toISOString()
+
+  const ticket = {
+    ticket_id: ticketId,
+    ticket_code: `AQT-${ticketId.slice(-6)}`,
+    report_type: reportType,
+    status: 'SUBMITTED',
+    created_at: createdAt,
+    latitude: lat,
+    longitude: lng,
+    description: String(req.body?.description ?? ''),
+    // Multer uses memory storage; this mock does not persist the uploaded photo.
+    photo_url: null,
+    history: [
+      {
+        status: 'SUBMITTED',
+        timestamp: createdAt
+      }
+    ]
+  }
+
+  // Make the new ticket available to tracking and history endpoints.
+  MOCK_TICKETS[ticketId] = ticket
+
+  return res.status(201).json({
+    success: true,
+    message: 'Laporan berhasil diterima.',
+    data: {
+      ticket_id: ticketId,
+      status: 'SUBMITTED'
+    }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// GET /api/tickets/:ticket_id
+// Contract ref: API_CONTRACT.md § 14
+// Success: 200 { success, data: ticket }
+// Error:   404 if ticket not found
+// ---------------------------------------------------------------------------
+app.get('/api/tickets/:ticket_id', (req, res) => {
+  const ticket = MOCK_TICKETS[req.params.ticket_id]
+
+  if (!ticket) {
+    return res.status(404).json({
+      success: false,
+      error: {
+        code: 'NOT_FOUND',
+        message: 'Ticket ID tidak ditemukan. Periksa kembali ID yang Anda masukkan.'
+      }
+    })
+  }
+
+  return res.status(200).json({
+    success: true,
+    data: ticket
+  })
+})
+
+// ---------------------------------------------------------------------------
+// GET /api/citizen/history
+// Contract ref: API_CONTRACT.md § 15
+// Role: Authenticated Citizen (mock: no real auth, returns static data)
+// Success: 200 { success, data: [ ticket summary, ... ] }
+// ---------------------------------------------------------------------------
+app.get('/api/citizen/history', (req, res) => {
+  // Return summary list — no private identity, no pipe data (DEC-011)
+  const history = Object.values(MOCK_TICKETS).map((t) => ({
+  ticket_id: t.ticket_id,
+  status: t.status,
+  created_at: t.created_at,
+  area: t.ticket_id === 'DEV-TICKET-001'
+    ? 'Karang Anyar, Tarakan Barat'
+    : t.ticket_id === 'DEV-TICKET-002'
+      ? 'Pamusian, Tarakan Tengah'
+      : 'Laporan baru'
+  }))
+
+  return res.status(200).json({
+    success: true,
+    data: history
+  })
+})
+
+// ---------------------------------------------------------------------------
+// GET /api/map/public
+// Contract ref: API_CONTRACT.md § 16
+// Role: Public (anonymous + authenticated)
+// Security: MUST NOT expose pipe GeoJSON, raw IoT data, citizen identity (DEC-011)
+// Success: 200 { success, data: { markers: [...] } }
+//
+// Markers use canonical risk level labels (DEC-001):
+//   JERNIH  = 0–30
+//   WASPADA = 31–70
+//   BAHAYA  = 71–100
+// No numeric Risk Score emitted (DEC-017: no invented formulas)
+// ---------------------------------------------------------------------------
+app.get('/api/map/public', (req, res) => {
+  const markers = [
+    {
+      id:    'PUB-LOC-01',
+      name:  'Area Karang Anyar',
+      lat:    3.3275,
+      lng:    117.5892,
+      level: 'BAHAYA',
+      updated_at: '2026-09-25T16:45:00.000Z'
+    },
+    {
+      id:    'PUB-LOC-02',
+      name:  'Area Pamusian',
+      lat:    3.3082,
+      lng:    117.6045,
+      level: 'WASPADA',
+      updated_at: '2026-09-25T16:30:00.000Z'
+    },
+    {
+      id:    'PUB-LOC-03',
+      name:  'Area Sebengkok',
+      lat:    3.2988,
+      lng:    117.5925,
+      level: 'JERNIH',
+      updated_at: '2026-09-25T15:00:00.000Z'
+    },
+    {
+      id:    'PUB-LOC-04',
+      name:  'Area Juata Laut',
+      lat:    3.3721,
+      lng:    117.5651,
+      level: 'JERNIH',
+      updated_at: '2026-09-25T16:10:00.000Z'
+    },
+    {
+      id:    'PUB-LOC-05',
+      name:  'Area Kampung Empat',
+      lat:    3.3150,
+      lng:    117.6180,
+      level: 'WASPADA',
+      updated_at: '2026-09-25T16:55:00.000Z'
+    }
+  ]
+
+  return res.status(200).json({
+    success: true,
+    data: { markers }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// GET /api/admin/dashboard
+// Contract ref: API_CONTRACT.md § 17
+// Role: Admin
+// Success: 200 { success, data: { ... } }
+// ---------------------------------------------------------------------------
+app.get('/api/admin/dashboard', (req, res) => {
+  return res.status(200).json({
+    success: true,
+    data: {
+      total_laporan_hari_ini: 24,
+      rata_rata_kekeruhan: 45.2,
+      active_maintenance: 5,
+      // System uptime is mock/static in UI, not sent from here per DEC-ADMIN-002
+      tren_laporan: {
+        labels: ['Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab', 'Min'],
+        data: [12, 19, 15, 25, 22, 10, 8]
+      },
+      kekeruhan_per_zona: {
+        labels: ['Timur', 'Tengah', 'Barat', 'Utara'],
+        data: [35, 42, 68, 20]
+      },
+      urgent_tickets: [
+        {
+          ticket_id: 'AQT-2026-0925-01',
+          lokasi: 'Karang Anyar, Tarakan Barat',
+          turbidity: 85,
+          risk_score: 95,
+          status: 'IN_REVIEW'
+        },
+        {
+          ticket_id: 'AQT-2026-0925-02',
+          lokasi: 'Pamusian, Tarakan Tengah',
+          turbidity: 65,
+          risk_score: 72,
+          status: 'SUBMITTED'
+        },
+        {
+          ticket_id: 'AQT-2026-0925-03',
+          lokasi: 'Sebengkok, Tarakan Tengah',
+          turbidity: 40,
+          risk_score: 45,
+          status: 'IN_PROGRESS'
+        }
+      ]
+    }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// GET /api/admin/tickets
+// Contract ref: API_CONTRACT.md § 18
+// Role: Admin
+// Success: 200 { success, data: [ ... ] }
+// ---------------------------------------------------------------------------
+app.get('/api/admin/tickets', (req, res) => {
+  return res.status(200).json({
+    success: true,
+    data: [
+      {
+        ticket_id: 'AQT-2026-0925-01',
+        keluhan: 'Air sangat keruh sejak subuh, bau tanah dan berwarna kecoklatan.',
+        lokasi: 'Zona Tarakan Tengah (Jl. Sudirman)',
+        waktu: '12 menit yang lalu',
+        turbidity: 85,
+        risk_score: 95,
+        status: 'SUBMITTED'
+      },
+      {
+        ticket_id: 'AQT-2026-0925-02',
+        keluhan: 'Aliran air mengecil drastis, nyaris mati.',
+        lokasi: 'Pamusian, Tarakan Tengah',
+        waktu: '1 jam yang lalu',
+        turbidity: 65,
+        risk_score: 72,
+        status: 'IN_REVIEW'
+      },
+      {
+        ticket_id: 'AQT-2026-0925-03',
+        keluhan: 'Air mati total dari malam.',
+        lokasi: 'Sebengkok, Tarakan Tengah',
+        waktu: '3 jam yang lalu',
+        turbidity: 40,
+        risk_score: 45,
+        status: 'CONFIRMED'
+      },
+      {
+        ticket_id: 'AQT-2026-0924-04',
+        keluhan: 'Pipa bocor di pinggir jalan dekat simpang 4.',
+        lokasi: 'Juata Laut, Tarakan Utara',
+        waktu: '1 hari yang lalu',
+        turbidity: 20,
+        risk_score: 15,
+        status: 'IN_PROGRESS'
+      },
+      {
+        ticket_id: 'AQT-2026-0922-05',
+        keluhan: 'Air kembali mengalir dengan deras, terima kasih.',
+        lokasi: 'Karang Anyar, Tarakan Barat',
+        waktu: '3 hari yang lalu',
+        turbidity: 15,
+        risk_score: 10,
+        status: 'CLOSED'
+      }
+    ]
+  })
+})
+
+// ---------------------------------------------------------------------------
+// GET /api/admin/tickets/:ticket_id/triage
+// Contract ref: Batch 3 Triage Data
+// Role: Admin
+// Success: 200 { success, data: { ... } }
+// ---------------------------------------------------------------------------
+app.get('/api/admin/tickets/:ticket_id/triage', (req, res) => {
+  return res.status(200).json({
+    success: true,
+    data: {
+      ticket_id: req.params.ticket_id,
+      citizen_report: {
+        photo_url: null, // placeholder trigger
+        complaint: 'Air sangat keruh sejak subuh, bau tanah dan berwarna kecoklatan.',
+        location: 'Zona Tarakan Tengah (Jl. Sudirman)',
+        timestamp: '2026-09-25T07:00:00.000Z'
+      },
+      iot_sensor: {
+        turbidity: 85,
+        pressure: 0.8
+        // pH omitted as allowed
+      },
+      risk_score: 95,
+      clustering: {
+        cluster_id: 'C-04',
+        centroid: { lat: 3.3275, lng: 117.5892 },
+        report_count: 5
+      },
+      ml_recommendation: 'Prioritaskan inspeksi fisik pada node pipa utama di Zona Tengah.',
+      audit_trail: [
+        { status: 'SUBMITTED', timestamp: '2026-09-25T07:00:00.000Z' },
+        { status: 'IN_REVIEW', timestamp: '2026-09-25T08:15:00.000Z' }
+      ]
+    }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// PUT /api/admin/tickets/:ticket_id/status
+// Contract ref: Batch 3 Action Execution
+// Role: Admin
+// Success: 200 { success, message: "Status updated" }
+// ---------------------------------------------------------------------------
+app.put('/api/admin/tickets/:ticket_id/status', (req, res) => {
+  const { status } = req.body
+  // Allowed mutation for Batch 3: IN_REVIEW -> CONFIRMED
+  if (status !== 'CONFIRMED') {
+    return res.status(400).json({
+      success: false,
+      error: {
+        message: 'Invalid status transition. Only CONFIRMED is allowed in this batch.'
+      }
+    })
+  }
+  return res.status(200).json({
+    success: true,
+    message: 'Status updated to CONFIRMED'
+  })
+})
+
+
+// ---------------------------------------------------------------------------
+// GET /api/admin/map
+// Contract ref: API_CONTRACT.md § 20 (Batch 4 Technical Contract)
+// Role: Admin
+// ---------------------------------------------------------------------------
+app.get('/api/admin/map', (req, res) => {
+  return res.status(200).json({
+    success: true,
+    data: {
+      reports: [
+        {
+          ticket_id: 'AQT-2026-0925-01',
+          latitude: 3.3275,
+          longitude: 117.5892,
+          status: 'SUBMITTED',
+          risk_score: 95,
+          risk_level: 'Bahaya'
+        },
+        {
+          ticket_id: 'AQT-2026-0925-02',
+          latitude: 3.3082,
+          longitude: 117.6045,
+          status: 'IN_REVIEW',
+          risk_score: 72,
+          risk_level: 'Bahaya'
+        },
+        {
+          ticket_id: 'AQT-2026-0925-03',
+          latitude: 3.2988,
+          longitude: 117.5925,
+          status: 'IN_PROGRESS',
+          risk_score: 45,
+          risk_level: 'Waspada'
+        },
+        {
+          ticket_id: 'AQT-2026-0924-04',
+          latitude: 3.3721,
+          longitude: 117.5651,
+          status: 'CONFIRMED',
+          risk_score: 15,
+          risk_level: 'Jernih'
+        }
+      ],
+      iot_nodes: [
+        {
+          node_id: 'NODE-001',
+          latitude: 3.3280,
+          longitude: 117.5890,
+          status: 'CRITICAL',
+          turbidity: 85.5,
+          pressure: 0.8
+        },
+        {
+          node_id: 'NODE-002',
+          latitude: 3.3080,
+          longitude: 117.6040,
+          status: 'ANOMALY',
+          turbidity: 45.0,
+          pressure: 1.2
+        },
+        {
+          node_id: 'NODE-003',
+          latitude: 3.3720,
+          longitude: 117.5650,
+          status: 'NORMAL',
+          turbidity: 10.5,
+          pressure: 1.5
+        }
+      ],
+      pipe_network: {
+        type: 'FeatureCollection',
+        features: [
+          {
+            type: 'Feature',
+            geometry: {
+              type: 'LineString',
+              coordinates: [
+                [117.5890, 3.3280],
+                [117.6040, 3.3080]
+              ]
+            },
+            properties: {
+              pipe_id: 'PIPE-MAIN-01'
+            }
+          },
+          {
+            type: 'Feature',
+            geometry: {
+              type: 'LineString',
+              coordinates: [
+                [117.6040, 3.3080],
+                [117.5650, 3.3720]
+              ]
+            },
+            properties: {
+              pipe_id: 'PIPE-DIST-02'
+            }
+          }
+        ]
+      },
+      clusters: [
+        {
+          cluster_id: 'C-01',
+          centroid: {
+            latitude: 3.3178,
+            longitude: 117.5966
+          },
+          report_count: 5
+        }
+      ],
+      heatmap: [
+        {
+          measurement_id: 101,
+          node_id: 1,
+          hardware_id: 'NODE-TARAKAN-01',
+          latitude: 3.3275,
+          longitude: 117.5892,
+          turbidity: 48.5,
+          intensity: 0.65,
+          category: 'WASPADA',
+          measured_at: new Date().toISOString()
+        },
+        {
+          measurement_id: 102,
+          node_id: 2,
+          hardware_id: 'NODE-TARAKAN-02',
+          latitude: 3.3082,
+          longitude: 117.6045,
+          turbidity: 92.0,
+          intensity: 0.95,
+          category: 'BAHAYA',
+          measured_at: new Date().toISOString()
+        }
+      ],
+      summary: {
+        total_sensor_points: 2,
+        max_turbidity: 92.0,
+        avg_turbidity: 70.25,
+        query_mode: 'latest',
+        hours_window: 24
+      }
+    }
+  })
+})
+
+
+// ---------------------------------------------------------------------------
+// Server Start
+// ---------------------------------------------------------------------------
+const PORT = 4000
+app.listen(PORT, () => {
+  console.log(`[AQUA-TARA Mock API] Listening on http://localhost:${PORT}`)
+  console.log('  POST /api/reports')
+  console.log('  GET  /api/tickets/:ticket_id')
+  console.log('  GET  /api/citizen/history')
+  console.log('  GET  /api/map/public')
+  console.log('  GET  /api/admin/dashboard')
+  console.log('  GET  /api/admin/tickets')
+  console.log('  GET  /api/admin/tickets/:ticket_id/triage')
+  console.log('  PUT  /api/admin/tickets/:ticket_id/status')
+})
