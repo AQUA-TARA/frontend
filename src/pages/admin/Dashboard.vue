@@ -2,6 +2,7 @@
 import { API_BASE } from '@/api/client'
 import { ref, onMounted, onUnmounted } from 'vue'
 import { ticketService } from '@/services/ticketService'
+import { fetchIoTNodes } from '@/services/iotNodeService'
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -34,8 +35,13 @@ ChartJS.register(
 const demoData = {
   total_laporan_hari_ini: 24,
   rata_rata_kekeruhan: 45,
+  rata_rata_tekanan: 1.84,
   active_maintenance: 5,
   system_uptime: 99.9,
+  persentase_node_aktif: 96.0,
+  jumlah_node_aktif: 48,
+  jumlah_node_nonaktif: 2,
+  total_node: 50,
   tren_laporan: {
     labels: ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'],
     data: [5, 6, 8, 12, 14, 7, 6]
@@ -182,9 +188,48 @@ const fetchDashboardData = async () => {
     }
 
     if (json?.success && json?.data) {
+      let avgPressure = json.data.rata_rata_tekanan
+      let nodeActiveStats = {}
+
+      // If backend did not provide rata_rata_tekanan or persentase_node_aktif directly, compute from nodes
+      if (avgPressure === undefined || json.data.persentase_node_aktif === undefined) {
+        try {
+          const nodeList = await fetchIoTNodes()
+          if (Array.isArray(nodeList) && nodeList.length > 0) {
+            if (avgPressure === undefined) {
+              const validPressures = nodeList
+                .map(n => n.pressure)
+                .filter(p => p !== null && p !== undefined && p !== '' && !isNaN(Number(p)))
+                .map(p => Number(p))
+              if (validPressures.length > 0) {
+                const sum = validPressures.reduce((acc, curr) => acc + curr, 0)
+                avgPressure = Number((sum / validPressures.length).toFixed(2))
+              }
+            }
+
+            if (json.data.persentase_node_aktif === undefined) {
+              const total = nodeList.length
+              const aktif = nodeList.filter(n => Boolean(n.is_active)).length
+              const nonaktif = total - aktif
+              const pct = total > 0 ? Number(((aktif / total) * 100).toFixed(1)) : 0
+              nodeActiveStats = {
+                total_node: total,
+                jumlah_node_aktif: aktif,
+                jumlah_node_nonaktif: nonaktif,
+                persentase_node_aktif: pct,
+              }
+            }
+          }
+        } catch (nodeErr) {
+          console.warn('Gagal menghitung statistik dari node:', nodeErr)
+        }
+      }
+
       dashboardData.value = {
         ...demoData,
         ...json.data,
+        ...nodeActiveStats,
+        ...(avgPressure !== undefined ? { rata_rata_tekanan: avgPressure } : {}),
         urgent_tickets: json.data.urgent_tickets?.length
           ? json.data.urgent_tickets
           : [],
@@ -391,30 +436,34 @@ const getStatusBadgeStyle = (status) => {
         </div>
       </div>
 
-      <!-- Card 3: Active Maintenance -->
-      <div class="bg-white border-2 border-[#54b8ea] rounded-xl p-5 flex flex-col justify-between shadow-sm relative overflow-hidden">
+      <!-- Card 3: Rata-rata Tekanan Air -->
+      <div class="bg-white border-2 border-[#54b8ea] rounded-xl p-5 flex flex-col justify-between shadow-sm relative overflow-hidden cursor-pointer" @click="router.push('/admin/nodes')">
         <div class="flex items-start justify-between">
-          <span class="text-xs font-medium text-slate-700">Active Maintenance</span>
+          <span class="text-xs font-medium text-slate-700">Rata-rata Tekanan Air</span>
           <div class="w-9 h-9 rounded-lg border border-slate-700 flex items-center justify-center text-slate-800">
+            <!-- Water pressure gauge / manometer meter icon -->
             <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M12 21a9 9 0 100-18 9 9 0 000 18z" />
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M12 12l3.5-3.5" />
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M12 13a1 1 0 100-2 1 1 0 000 2z" />
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M6.5 12h1M16.5 12h1M12 6.5v1" />
             </svg>
           </div>
         </div>
         <div class="mt-2">
           <div class="text-3xl font-extrabold text-slate-900 tracking-tight">
-            {{ dashboardData?.active_maintenance ?? 5 }}
+            {{ dashboardData?.rata_rata_tekanan != null ? dashboardData.rata_rata_tekanan : '—' }} <span class="text-xl font-bold">bar</span>
           </div>
           <div class="mt-2 inline-flex items-center px-2 py-0.5 rounded-full border border-slate-700 text-[10px] font-medium text-slate-700">
-            2 Regu Lapangan
+            Status Normal
           </div>
         </div>
       </div>
 
-      <!-- Card 4: System Uptime -->
+      <!-- Card 4: Persentase Node Aktif -->
       <div class="bg-white border-2 border-[#54b8ea] rounded-xl p-5 flex flex-col justify-between shadow-sm relative overflow-hidden">
         <div class="flex items-start justify-between">
-          <span class="text-xs font-medium text-slate-700">System Uptime</span>
+          <span class="text-xs font-medium text-slate-700">Persentase Node Aktif</span>
           <div class="w-9 h-9 rounded-lg border border-slate-700 flex items-center justify-center text-slate-800">
             <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
@@ -424,10 +473,27 @@ const getStatusBadgeStyle = (status) => {
         </div>
         <div class="mt-2">
           <div class="text-3xl font-extrabold text-slate-900 tracking-tight">
-            99.9%
+            {{
+              dashboardData?.persentase_node_aktif != null
+                ? `${dashboardData.persentase_node_aktif}%`
+                : (dashboardData?.total_node === 0 ? '0%' : '—')
+            }}
           </div>
           <div class="mt-2 inline-flex items-center px-2 py-0.5 rounded-full border border-slate-700 text-[10px] font-medium text-slate-700">
-            Semua Node Aktif
+            <template v-if="dashboardData?.total_node != null">
+              <template v-if="dashboardData.total_node === 0">
+                Belum Ada Node
+              </template>
+              <template v-else-if="dashboardData.jumlah_node_nonaktif === 0">
+                Semua Node Aktif ({{ dashboardData.jumlah_node_aktif }})
+              </template>
+              <template v-else>
+                {{ dashboardData.jumlah_node_aktif ?? 0 }} Aktif • {{ dashboardData.jumlah_node_nonaktif ?? 0 }} Nonaktif
+              </template>
+            </template>
+            <template v-else>
+              Memuat status...
+            </template>
           </div>
         </div>
       </div>

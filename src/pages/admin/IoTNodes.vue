@@ -100,18 +100,19 @@ onMounted(fetchNodes)
               <th class="px-6 py-4 text-center">Status</th>
               <th class="px-6 py-4 text-center">Terakhir Update</th>
               <th class="px-6 py-4 text-center">Kekeruhan (NTU)</th>
+              <th class="px-6 py-4 text-center">Tekanan Air (bar)</th>
             </tr>
           </thead>
 
           <tbody class="divide-y divide-slate-100 text-xs text-slate-800">
             <tr v-if="isLoading">
-              <td colspan="6" class="px-6 py-10 text-center text-slate-500">
+              <td colspan="7" class="px-6 py-10 text-center text-slate-500">
                 Memuat data node IoT...
               </td>
             </tr>
 
             <tr v-else-if="errorMessage">
-              <td colspan="6" class="px-6 py-10 text-center text-red-600">
+              <td colspan="7" class="px-6 py-10 text-center text-red-600">
                 {{ errorMessage }}
                 <button
                   @click="fetchNodes"
@@ -123,7 +124,7 @@ onMounted(fetchNodes)
             </tr>
 
             <tr v-else-if="nodes.length === 0">
-              <td colspan="6" class="px-6 py-10 text-center text-slate-500">
+              <td colspan="7" class="px-6 py-10 text-center text-slate-500">
                 Belum ada node IoT. Klik "Tambah Node" untuk menambahkan node.
               </td>
             </tr>
@@ -175,7 +176,19 @@ onMounted(fetchNodes)
                     ? Number(node.turbidity).toLocaleString('id-ID', {
                         maximumFractionDigits: 2,
                       })
-                    : '-'
+                    : '—'
+                }}
+              </td>
+
+              <!-- Kolom Tekanan Air -->
+              <td class="px-6 py-4 text-center">
+                {{
+                  node.pressure != null
+                    ? Number(node.pressure).toLocaleString('id-ID', {
+                        minimumFractionDigits: 1,
+                        maximumFractionDigits: 2,
+                      })
+                    : '—'
                 }}
               </td>
             </tr>

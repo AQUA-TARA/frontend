@@ -300,8 +300,13 @@ app.get('/api/admin/dashboard', (req, res) => {
     data: {
       total_laporan_hari_ini: 24,
       rata_rata_kekeruhan: 45.2,
+      rata_rata_tekanan: 1.84,
       active_maintenance: 5,
-      // System uptime is mock/static in UI, not sent from here per DEC-ADMIN-002
+      system_uptime: 99.9,
+      persentase_node_aktif: 96.0,
+      jumlah_node_aktif: 48,
+      jumlah_node_nonaktif: 2,
+      total_node: 50,
       tren_laporan: {
         labels: ['Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab', 'Min'],
         data: [12, 19, 15, 25, 22, 10, 8]
