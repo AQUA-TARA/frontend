@@ -16,7 +16,9 @@
 // Defaults to Laravel local development server (http://localhost:8000).
 // Automatically strips trailing slashes and redundant '/api' suffix to prevent '/api/api' duplicates.
 const rawApiUrl = (
-  import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL || ''
+  import.meta.env.VITE_API_BASE_URL ||
+  import.meta.env.VITE_API_URL ||
+  (import.meta.env.PROD ? 'https://backend-nu-azure-25.vercel.app' : 'http://localhost:8000')
 ).trim().replace(/\/+$/, '')
 
 export const API_BASE = rawApiUrl.endsWith('/api')
@@ -51,6 +53,7 @@ export async function submitReport(payload) {
   })
 
   const json = await response.json().catch(() => null)
+
   if (!response.ok || !json?.success) {
     const errorMsg = json?.message || (json?.errors ? Object.values(json.errors).flat().join(', ') : `Gagal mengirim laporan (HTTP ${response.status})`)
     const error = new Error(errorMsg)
