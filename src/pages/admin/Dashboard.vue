@@ -1,6 +1,6 @@
 <script setup>
 import { API_BASE } from '@/api/client'
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { ticketService } from '@/services/ticketService'
 import { fetchIoTNodes } from '@/services/iotNodeService'
 import {
@@ -135,13 +135,29 @@ const demoData = {
 }
 
 const router = useRouter()
-const loading = ref(true) // show loading spinner initially
+const isDownloading = ref(false);
+const isDownloaded = ref(false);
 const error = ref(null)
 const dashboardData = ref(demoData) // initialize with demo data
 const isDemo = ref(false)
 
 // Download CSV report of tickets
 const downloadReport = async () => {
+  // original implementation retained for other usages
+  try {
+    const blob = await ticketService.downloadReport();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'report_tickets.csv';
+    a.click();
+    URL.revokeObjectURL(url);
+  } catch (e) {
+    console.error('Download failed', e);
+    alert('Gagal mengunduh laporan');
+    throw e; // propagate error for state handling
+  }
+}; {
   try {
     const blob = await ticketService.downloadReport();
     const url = URL.createObjectURL(blob);
@@ -263,26 +279,37 @@ onUnmounted(() => {
   if (pollInterval) clearInterval(pollInterval)
 })
 
-// Line chart options matching reference
-const lineChartOptions = {
-  responsive: true,
-  maintainAspectRatio: false,
-  plugins: {
-    legend: { display: false }
-  },
-  scales: {
-    y: {
-      min: 0,
-      max: 20,
-      ticks: { stepSize: 5, color: '#64748b', font: { size: 10 } },
-      grid: { color: '#e2e8f0', borderDash: [3, 3] }
-    },
-    x: {
-      ticks: { color: '#64748b', font: { size: 10 } },
-      grid: { display: false }
+// Line chart options with dynamic Y‑axis scaling
+const lineChartOptions = computed(() => {
+  const data = dashboardData.value?.tren_laporan?.data || [];
+  const maxData = data.length ? Math.max(...data) : 0;
+  // Fallback maximum when all values are zero
+  const rawMax = maxData === 0 ? 5 : Math.ceil(maxData * 1.1);
+  const steps = [1,2,5,10,20,50,100,200,500,1000];
+  // Choose a step so that there are at most ~5-6 ticks
+  let step = steps.find(s => rawMax / s <= 6) || steps[steps.length - 1];
+  // Ensure step is at least 1
+  step = Math.max(step, 1);
+  const max = step * Math.ceil(rawMax / step);
+  return {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: { legend: { display: false } },
+    scales: {
+      y: {
+        min: 0,
+        max,
+        ticks: { stepSize: step, color: '#64748b', font: { size: 10 } },
+        grid: { color: '#e2e8f0', borderDash: [3, 3] }
+      },
+      x: {
+        ticks: { color: '#64748b', font: { size: 10 } },
+        grid: { display: false }
+      }
     }
-  }
-}
+  };
+});
+
 
 const barChartOptions = {
   responsive: true,
